@@ -5,15 +5,14 @@ import heapq
 
 def solve(lines: list[str]) -> int:
     """
-    Решает задачу о сортировке амфиподов в лабиринте.
+    Решает задачу о сортировке амфиподов в лабиринте (оба варианта: глубина 2 и 4).
 
     Args:
-        lines: Список строк, представляющих лабиринт (включая стены и комнаты).
+        lines: Список строк, представляющих лабиринт.
 
     Returns:
         Минимальная суммарная энергия, необходимая для достижения целевой конфигурации.
     """
-
     hallway_positions = [0, 1, 3, 5, 7, 9, 10]
     room_positions = [2, 4, 6, 8]
     energy_cost = {'A': 1, 'B': 10, 'C': 100, 'D': 1000}
@@ -21,95 +20,78 @@ def solve(lines: list[str]) -> int:
 
     rooms = []
     for line in lines[2:-1]:
-        row = [c for c in line if c in "ABCD"]
-        rooms.append(row)
+        rooms.append([c for c in line if c in "ABCD"])
     depth = len(rooms)
-    rooms = list(map(list, zip(*rooms)))
+    rooms = tuple(zip(*rooms))
+    start = ('.' * 11, rooms)
+    goal = ('.' * 11, tuple(tuple(ch for _ in range(depth)) for ch in "ABCD"))
 
-    start_state = (tuple('.' * 11), tuple(tuple(r) for r in rooms))
-    final_state = (
-        tuple('.' * 11),
-        tuple(tuple(x for _ in range(depth)) for x in "ABCD")
-    )
+    def path_clear(hall, a, b):
+        step = 1 if a < b else -1
+        for pos in range(a + step, b + step, step):
+            if hall[pos] != '.':
+                return False
+        return True
 
-    def is_path_clear(hall, a, b):
-        if a < b:
-            return all(c == '.' for c in hall[a + 1:b + 1])
-        else:
-            return all(c == '.' for c in hall[b:a])
-
-    def move_to_room(hall, rooms, i):
-        amph = hall[i]
-        target = room_for[amph]
-        room = rooms[target]
-        if any(c != amph and c != '.' for c in room):
-            return []
-        room_pos = room_positions[target]
-        if not is_path_clear(hall, i, room_pos):
-            return []
-        depth_index = max(d for d, c in enumerate(room) if c == '.')
-        steps = abs(i - room_pos) + depth_index + 1
-        new_hall = list(hall)
-        new_rooms = [list(r) for r in rooms]
-        new_hall[i] = '.'
-        new_rooms[target][depth_index] = amph
-        new_state = (tuple(new_hall), tuple(tuple(r) for r in new_rooms))
-        return [(new_state, steps * energy_cost[amph])]
-
-    def move_to_hall(hall, rooms, room_idx):
-        room = rooms[room_idx]
-        room_label = "ABCD"[room_idx]
-        for depth_index, amph in enumerate(room):
-            if amph == '.':
-                continue
-            if amph == room_label and all(c == room_label for c in room[depth_index:]):
-                return []
-            room_pos = room_positions[room_idx]
-            results = []
-            for i in hallway_positions:
-                if is_path_clear(hall, i, room_pos):
-                    steps = abs(i - room_pos) + depth_index + 1
-                    new_hall = list(hall)
-                    new_rooms = [list(r) for r in rooms]
-                    new_rooms[room_idx][depth_index] = '.'
-                    new_hall[i] = amph
-                    new_state = (tuple(new_hall), tuple(tuple(r) for r in new_rooms))
-                    results.append((new_state, steps * energy_cost[amph]))
-            return results
-        return []
-
-    def neighbors(state):
+    def moves(state):
         hall, rooms = state
-        result = []
-        for i, c in enumerate(hall):
-            if c in "ABCD":
-                result += move_to_room(hall, rooms, i)
-        for j in range(4):
-            result += move_to_hall(hall, rooms, j)
-        return result
+        # 1. Попробовать переместить из холла в комнаты (приоритет!)
+        for i, amph in enumerate(hall):
+            if amph not in "ABCD":
+                continue
+            target = room_for[amph]
+            room = rooms[target]
+            if any(c != amph and c != '.' for c in room):
+                continue
+            dest = room_positions[target]
+            if not path_clear(hall, i, dest):
+                continue
+            depth_idx = max(d for d, c in enumerate(room) if c == '.')
+            steps = abs(i - dest) + depth_idx + 1
+            new_hall = hall[:i] + '.' + hall[i + 1:]
+            new_rooms = list(map(list, rooms))
+            new_rooms[target][depth_idx] = amph
+            yield (new_hall, tuple(tuple(r) for r in new_rooms)), steps * energy_cost[amph]
+            return  # После успешного входа других ходов не ищем
 
-    pq = [(0, start_state)]
-    seen = {start_state: 0}
+        # 2. Перемещения из комнат в холл
+        for r_idx, room in enumerate(rooms):
+            room_label = "ABCD"[r_idx]
+            if all(c in ('.', room_label) for c in room):
+                continue
+            for depth_idx, amph in enumerate(room):
+                if amph == '.':
+                    continue
+                src = room_positions[r_idx]
+                for pos in hallway_positions:
+                    if path_clear(hall, src, pos):
+                        steps = abs(pos - src) + depth_idx + 1
+                        new_hall = hall[:pos] + amph + hall[pos + 1:]
+                        new_rooms = list(map(list, rooms))
+                        new_rooms[r_idx][depth_idx] = '.'
+                        yield (new_hall, tuple(tuple(r) for r in new_rooms)), steps * energy_cost[amph]
+                break 
+        return
+
+    pq = [(0, start)]
+    seen = {start: 0}
     while pq:
         cost, state = heapq.heappop(pq)
-        if state == final_state:
+        if state == goal:
             return cost
         if cost > seen[state]:
             continue
-        for nstate, ncost in neighbors(state):
-            total = cost + ncost
-            if total < seen.get(nstate, 1e18):
+        for nstate, step_cost in moves(state):
+            total = cost + step_cost
+            if total < seen.get(nstate, 10**12):
                 seen[nstate] = total
                 heapq.heappush(pq, (total, nstate))
-
     return -1
 
 
 def main():
-    """Точка входа программы: считывает вход и выводит результат."""
     lines = [line.rstrip('\n') for line in sys.stdin if line.strip()]
-    result = solve(lines)
-    print(result)
+    print(solve(lines))
 
 
 if __name__ == "__main__":
