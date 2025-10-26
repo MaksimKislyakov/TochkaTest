@@ -112,7 +112,6 @@ def solve(lines: list[str]) -> int:
 
     return -1
 
-
 def main():
     """Точка входа программы: считывает вход и выводит результат."""
     lines = [line.rstrip('\n') for line in sys.stdin if line.strip()]
