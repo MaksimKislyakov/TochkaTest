@@ -61,14 +61,13 @@ def solve(lines: list[str]) -> int:
 
     def move_to_hall(hall, rooms, room_idx):
         room = rooms[room_idx]
+        room_label = "ABCD"[room_idx]
         for depth_index, amph in enumerate(room):
             if amph == '.':
                 continue
-            # Если уже все правильные — не трогаем
-            if all(c == room_label for c in room[depth_index:] if c != '.'):
-                room_label = "ABCD"[room_idx]
-                if amph == room_label:
-                    return []
+            # Если все оставшиеся внизу амфиподы уже правильные — не выходим
+            if amph == room_label and all(c == room_label for c in room[depth_index:]):
+                return []
             room_pos = room_positions[room_idx]
             results = []
             for i in hallway_positions:
