@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import sys
-from collections import defaultdict, deque
+from collections import deque, defaultdict
+from functools import lru_cache
 
 
 def solve(edges: list[tuple[str, str]]) -> list[str]:
     """
-    Решение задачи об изоляции вируса.
+    Решение задачи об изоляции вируса
 
     Args:
         edges: список коридоров в формате (узел1, узел2)
@@ -13,105 +14,112 @@ def solve(edges: list[tuple[str, str]]) -> list[str]:
     Returns:
         список отключаемых коридоров в формате "Шлюз-узел"
     """
+    static_adj = defaultdict(set)
+    gateway_edges = set()
+    nodes, gateways = set(), set()
 
-    # --- Построение графа ---
-    graph = defaultdict(set)
-    gateways = set()
     for u, v in edges:
-        graph[u].add(v)
-        graph[v].add(u)
-        if u.isupper():
-            gateways.add(u)
-        if v.isupper():
-            gateways.add(v)
+        nodes.add(u); nodes.add(v)
+        if u.isupper() and not v.isupper():
+            gateway_edges.add((u, v)); gateways.add(u)
+        elif v.isupper() and not u.isupper():
+            gateway_edges.add((v, u)); gateways.add(v)
+        else:
+            static_adj[u].add(v); static_adj[v].add(u)
 
-    virus = 'a'  # начальная позиция вируса
-    result = []
+    def build_adj(rem):
+        adj = {n: set(static_adj[n]) for n in nodes}
+        for g, n in rem:
+            adj[g].add(n); adj[n].add(g)
+        return adj
 
-    # --- Основной цикл ---
-    while True:
-        # Находим ближайший шлюз и путь до него
-        target, path = find_target_path(graph, gateways, virus)
-        if not target:
-            break  # вирус не может добраться ни до одного шлюза
+    def find_target_and_path(adj, start):
+        q = deque([start])
+        dist = {start: 0}
+        while q:
+            cur = q.popleft()
+            for nei in sorted(adj[cur]):
+                if nei not in dist:
+                    dist[nei] = dist[cur] + 1
+                    q.append(nei)
+        min_d, cands = None, []
+        for g in gateways:
+            if g in dist:
+                d = dist[g]
+                if min_d is None or d < min_d:
+                    min_d, cands = d, [g]
+                elif d == min_d:
+                    cands.append(g)
+        if min_d is None:
+            return None, []
+        target = min(cands)
+        q = deque([start]); parent = {start: None}
+        while q:
+            cur = q.popleft()
+            if cur == target:
+                break
+            for nei in sorted(adj[cur]):
+                if nei not in parent:
+                    parent[nei] = cur; q.append(nei)
+        if target not in parent:
+            return None, []
+        path, cur = [], target
+        while cur is not None:
+            path.append(cur); cur = parent[cur]
+        path.reverse()
+        return target, path
 
-        # Если вирус уже рядом со шлюзом — надо срочно изолировать этот шлюз
-        for g in sorted(gateways):
-            for n in sorted(graph[g]):
-                if n == virus:
-                    result.append(f"{g}-{n}")
-                    graph[g].remove(n)
-                    graph[n].remove(g)
-                    break
-            else:
+    def virus_step(adj, virus_pos):
+        target, path = find_target_and_path(adj, virus_pos)
+        if not path:
+            return None
+        return path[1] if len(path) >= 2 else path[0]
+
+    @lru_cache(maxsize=None)
+    def can_win(rem_frozen, virus):
+        rem = set(rem_frozen)
+        adj = build_adj(rem)
+        nxt = virus_step(adj, virus)
+        if nxt is None:
+            return True
+        if not rem:
+            return False
+        for g, n in sorted(rem):
+            new_rem = rem.copy(); new_rem.remove((g, n))
+            adj2 = build_adj(new_rem)
+            vnext = virus_step(adj2, virus)
+            if vnext is None:
+                return True
+            if vnext.isupper():
                 continue
+            if can_win(frozenset(new_rem), vnext):
+                return True
+        return False
+
+    res, rem, virus = [], set(gateway_edges), 'a'
+    while True:
+        adj = build_adj(rem)
+        if virus_step(adj, virus) is None:
             break
-        else:
-            # Иначе блокируем ближайшее возможное соединение шлюза
-            next_node = path[1] if len(path) > 1 else virus
-            # Проверим, какой шлюз соединён с узлом на пути
-            candidates = []
-            for g in gateways:
-                for n in graph[g]:
-                    if n == next_node:
-                        candidates.append(f"{g}-{n}")
-            if candidates:
-                block = sorted(candidates)[0]
-                g, n = block.split('-')
-                graph[g].remove(n)
-                graph[n].remove(g)
-                result.append(block)
-            else:
-                # Если нет прямого соединения — выберем лексикографически минимальное из доступных
-                all_edges = [f"{g}-{n}" for g in gateways for n in graph[g]]
-                if not all_edges:
-                    break
-                block = sorted(all_edges)[0]
-                g, n = block.split('-')
-                graph[g].remove(n)
-                graph[n].remove(g)
-                result.append(block)
-
-        # После отключения вирус делает ход
-        target, path = find_target_path(graph, gateways, virus)
-        if not target:
+        chosen = None
+        for g, n in sorted(rem):
+            new_rem = rem.copy(); new_rem.remove((g, n))
+            adj2 = build_adj(new_rem)
+            vnext = virus_step(adj2, virus)
+            if vnext is None or (not vnext.isupper() and can_win(frozenset(new_rem), vnext)):
+                chosen = (g, n)
+                rem = new_rem
+                res.append(f"{g}-{n}")
+                break
+        if not chosen:
             break
-        if len(path) >= 2:
-            virus = path[1]
-        else:
+        adj_after = build_adj(rem)
+        vstep = virus_step(adj_after, virus)
+        if vstep is None or vstep.isupper():
             break
+        virus = vstep
 
-    return result
-
-
-def find_target_path(graph, gateways, start):
-    """
-    Находит ближайший шлюз и путь до него.
-
-    Args:
-        graph: граф сети (dict)
-        gateways: множество шлюзов
-        start: текущая позиция вируса
-
-    Returns:
-        (шлюз, путь_список)
-    """
-    visited = {start}
-    q = deque([(start, [start])])
-    found = []
-    while q:
-        node, path = q.popleft()
-        if node in gateways:
-            found.append((node, path))
-            break
-        for nei in sorted(graph[node]):
-            if nei not in visited:
-                visited.add(nei)
-                q.append((nei, path + [nei]))
-    if not found:
-        return None, []
-    found.sort(key=lambda x: (len(x[1]), x[0]))
-    return found[0]
+    return res
 
 
 def main():
@@ -119,13 +127,10 @@ def main():
     for line in sys.stdin:
         line = line.strip()
         if line:
-            node1, sep, node2 = line.partition('-')
-            if sep:
-                edges.append((node1, node2))
-
-    result = solve(edges)
-    for edge in result:
-        print(edge)
+            a, _, b = line.partition('-')
+            edges.append((a, b))
+    for e in solve(edges):
+        print(e)
 
 
 if __name__ == "__main__":
